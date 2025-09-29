@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Tarot Falı — 4 Kart</title>
+  <style>
+    :root {
+      --bg-main: hsl(210, 60%, 97%);
+      --bg-card: hsl(210, 60%, 99%);
+      --bg-output: hsl(210, 60%, 98%);
+      --color-main: #111;
+      --color-meta: #555;
+      --color-small: #666;
+      --btn-main: hsl(220, 90%, 56%);
+      --btn-secondary: hsl(220, 10%, 50%);
+      --prompt-bg: hsl(220, 40%, 12%);
+      --prompt-color: #fff;
+      --border-card: #eee;
+      --border-output: #e6eefc;
+    }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;line-height:1.4;margin:0;background:var(--bg-main);color:var(--color-main)}
+    .wrap{
+      width:100%;
+      max-width:960px;
+      margin:30px auto;
+      padding:20px;
+      background:#fff;
+      border-radius:12px;
+      box-shadow:0 6px 18px rgba(20,20,40,0.06);
+    }
+    @media (max-width:700px){
+      .wrap{
+        margin:0;
+        border-radius:0;
+        padding:8px;
+        box-shadow:none;
+      }
+    }
+    h1{margin:0 0 10px;font-size:22px}
+    .cards{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}
+    .card{width:calc(25% - 9px);min-width:140px;background:var(--bg-card);border-radius:8px;padding:8px;text-align:center;border:1px solid var(--border-card)}
+    .card img{width:auto;max-width:100%;height:100%;object-fit:contain;border-radius:6px;display:block;margin-left:auto;margin-right:auto;}
+    /* --- Ekle: Kartlar taşarsa kaydırma için --- */
+    @media (max-width:700px){
+      .cards{flex-wrap:nowrap;overflow-x:auto;}
+      .card{min-width:180px;flex:0 0 180px;}
+    }
+    /* --- Ekle: Çok kart varsa responsive grid --- */
+    @media (min-width:701px){
+      .cards{flex-wrap:wrap;}
+      .card{flex:1 1 200px;max-width:220px;}
+    }
+    .card .title{font-weight:600;margin-top:8px;font-size:14px}
+    .meta{font-size:12px;color:var(--color-meta);margin-top:6px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+    button{background:var(--btn-main);color:#fff;border:none;padding:10px 12px;border-radius:8px;cursor:pointer}
+    button.secondary{background:var(--btn-secondary)}
+    .output{white-space:pre-wrap;padding:12px;border-radius:8px;background:var(--bg-output);border:1px dashed var(--border-output);margin-top:16px}
+    .small{font-size:13px;color:var(--color-small);margin-top:6px}
+    .prompt-box{display:block;background:var(--prompt-bg);color:var(--prompt-color);padding:12px;border-radius:8px;margin-top:12px;font-family:monospace;font-size:13px;overflow:auto;max-height:160px}
+
+    .card-flip {
+      perspective: 900px;
+      position: relative;
+      min-height: 180px;
+    }
+    .card-inner {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transition: transform 0.7s cubic-bezier(.4,2,.3,1);
+      transform-style: preserve-3d;
+    }
+    .card.flipped .card-inner {
+      transform: rotateY(180deg);
+    }
+    .card-front, .card-back-face {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      left: 0; top: 0;
+      backface-visibility: hidden;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+    .card-front {
+      transform: rotateY(180deg); /* Front is rotated initially */
+      z-index: 2;
+      background: var(--bg-card);
+    }
+    .card-back-face {
+      /* No transform here - back is visible by default */
+      background: var(--bg-card);
+    }
+    .card-back-face img {
+      width: 80%;
+      max-width: 120px;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      margin: auto;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Tarot Falı — Rastgele 4 Kart</h1>
+    <div class="controls">
+      <button id="drawBtn">4 Kart Çek</button>
+      <button id="aiBtn">Falı Yapay Zekâ ile Oluştur (API)</button>
+      <button id="localBtn" class="secondary">Basit Yerel Yorum (API Yoksa)</button>
+      <span class="small">Not: API ile çalışmak için bir backend proxy veya OpenAI anahtarına ihtiyacınız var. Aşağıda örnek backend var.</span>
+    </div>
+
+    <div id="cards" class="cards" aria-live="polite"></div>
+
+    <div style="margin-top: 50px;">
+      <strong>Oluşturulan Prompt (AI'ye gönderilecek):</strong>
+      <div id="prompt" class="prompt-box"></div>
+    </div>
+
+    <div style="margin-top:12px">
+      <strong>Fal Yorumu:</strong>
+      <div id="result" class="output">Burada fal görüntülenecek.</div>
+    </div>
+  </div>
+
+  <script>
+    // Ayarlar
+    const JSON_PATH = "tarot-images.json"; // tarot dosyan yerel dizinde olmalı
+    const IMAGE_FOLDER = "images/"; // img alanı ör. m00.jpg --> images/m00.jpg
+    // Eğer doğrudan istemciden OpenAI çağırmayacaksan, serverProxyURL boş olsun.
+    // Aşağıdaki server örneği için: "/api/ai" (server.js'de bu route'u kullanıyoruz)
+    const serverProxyURL = "/api/ai"; // veya "" (kullanma) - kendi backend kurmadıysan boş bırak
+
+    let allCards = [];
+
+    async function loadDataset(){
+      try{
+        const r = await fetch(JSON_PATH);
+        if(!r.ok) throw new Error("Tarot JSON yüklenemedi: " + r.status);
+        const j = await r.json();
+        allCards = j.cards || [];
+      }catch(e){
+        console.error(e);
+        document.getElementById("result").textContent = "Veri yüklenemedi. tarot-images.json dosyasının aynı klasörde ve doğru formatta olduğundan emin olun.";
+      }
+    }
+
+    function pickRandom4(){
+      if(!allCards.length) return [];
+      const copy = [...allCards];
+      const out = [];
+      for(let i=0;i<4;i++){
+        const idx = Math.floor(Math.random()*copy.length);
+        out.push(copy.splice(idx,1)[0]);
+      }
+      return out;
+    }
+
+    function createCardElement(c, showBack=true){
+      const el = document.createElement("div");
+      el.className = "card card-flip";
+      el.style.opacity = "0";
+      setTimeout(()=>{ el.style.opacity = "1"; }, 50);
+
+      // Card inner for flipping
+      const inner = document.createElement("div");
+      inner.className = "card-inner";
+
+      // Front face (actual card)
+      const front = document.createElement("div");
+      front.className = "card-front";
+      const img = document.createElement("img");
+      img.src = IMAGE_FOLDER + (c.img || "");
+      img.alt = c.name;
+      img.onerror = ()=>{
+        img.style.opacity = 0.25;
+        img.title = "Görsel bulunamadı: " + img.src;
+        console.warn("Görsel bulunamadı:", img.src);
+      }
+      front.appendChild(img);
+      const title = document.createElement("div");
+      title.className = "title";
+      title.textContent = c.name;
+      front.appendChild(title);
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.innerHTML = (c.arcana ? c.arcana + " • " : "") + (c.suit ? c.suit : "");
+      front.appendChild(meta);
+
+      // Back face (assets/card-back.jpg)
+      const back = document.createElement("div");
+      back.className = "card-back-face";
+      const backImg = document.createElement("img");
+      backImg.src = "assets/card-back.jpg";
+      backImg.alt = "Kart Arkası";
+      back.appendChild(backImg);
+
+      inner.appendChild(front);
+      inner.appendChild(back);
+      el.appendChild(inner);
+
+      // By default, show back (not flipped)
+      if(showBack){
+        // do not add flipped
+      } else {
+        el.classList.add("flipped");
+      }
+      return el;
+    }
+
+    function renderCards(cards, animated=false){
+      const container = document.getElementById("cards");
+      container.innerHTML = "";
+      if(!animated){
+        cards.forEach(c=>{
+          const cardEl = createCardElement(c, true);
+          cardEl.classList.add("flipped"); // Show front immediately
+          container.appendChild(cardEl);
+        });
+        return;
+      }
+      
+      // Animated: show all backs first, then flip one by one
+      const cardEls = [];
+      cards.forEach(c=> {
+        const cardEl = createCardElement(c, true); // show back
+        container.appendChild(cardEl);
+        cardEls.push(cardEl);
+      });
+      
+      // Flip cards one by one with delays
+      cardEls.forEach((cardEl, index) => {
+        setTimeout(() => {
+          cardEl.classList.add("flipped"); // flip to front
+        }, 600 + (index * 300)); // 600ms initial delay, then 300ms between each card
+      });
+    }
+
+    function buildPrompt(cards){
+      // Prompt: kart başlık + kısa özet (keywords + fortune_telling + light/shadow ilk satırlar)
+      let p = "Aşağıdaki 4 tarot kartı seçildi. Her kartın adı, anahtar kelimeleri ve kısa anlamları aşağıda:\n\n";
+      cards.forEach((c,i)=>{
+        p += `${i+1}) ${c.name}\n`;
+        if(c.keywords) p += "Anahtar kelimeler: " + (c.keywords.join(", ")) + "\n";
+        if(c.fortune_telling) p += "Fal ipuçları: " + (c.fortune_telling.join("; ")) + "\n";
+        if(c.meanings && c.meanings.light) p += "Pozitif (light): " + c.meanings.light.slice(0,3).join("; ") + "\n";
+        if(c.meanings && c.meanings.shadow) p += "Negatif (shadow): " + c.meanings.shadow.slice(0,3).join("; ") + "\n";
+        p += "\n";
+      });
+
+      // --- Değişiklik: Kart adlarının fal yorumunda açıkça belirtilmesini iste ---
+      p += "Görev: Bu dört kartın anlamlarını birleştirerek akıcı, empatik ve rehberlik odaklı bir tarot falı yaz. ";
+      p += "Yorumun başında seçilen kartların adlarını (ör: 'Çekilen kartlar: ...') açıkça belirt. ";
+      p += "Yapıyı şu şekilde ver: (1) Kısa özet (2) Şu anki durum / ruh hali (3) Engeller / uyarılar (4) Öneriler / eylem adımları. ";
+      p += "Ton: nazik, güçlendirici ve net. Maksimum ~300-450 kelime.";
+
+      return p;
+    }
+
+    // Basit yerel yorum (API yoksa fallback)
+    function localSimpleReading(cards){
+      // Çok basit birleştirme: anahtar kelimeleri topla ve cümlelerle ifade et
+      const keys = [];
+      const positives = [];
+      const negatives = [];
+      cards.forEach(c=>{
+        if(c.keywords) keys.push(...c.keywords.slice(0,3));
+        if(c.meanings && c.meanings.light) positives.push(c.meanings.light[0]);
+        if(c.meanings && c.meanings.shadow) negatives.push(c.meanings.shadow[0]);
+      });
+      const summary = `Kartların ana teması: ${Array.from(new Set(keys)).slice(0,8).join(", ")}.`;
+      const now = `Şu an: ${positives.slice(0,3).join("; ")}.`;
+      const warn = `Dikkat: ${negatives.slice(0,3).join("; ")}.`;
+      const advice = `Öneri: Öncelikle içgüdülerinize güvenin; somut adımlar olarak 1) durumu gözlemleyin, 2) küçük bir adım planlayın, 3) destek isteyin.`;
+      return [summary, now, warn, advice].join("\n\n");
+    }
+
+    async function callAI(promptText){
+      // Eğer serverProxyURL tanımlıysa proxy üzerinden çağır (daha güvenli)
+      if(!serverProxyURL){
+        throw new Error("serverProxyURL boş; API çağrısı için backend yapılandırılmamış.");
+      }
+      try {
+        const res = await fetch(serverProxyURL, {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({prompt: promptText})
+        });
+        const t = await res.text();
+        if(!res.ok){
+          // Backend error: show response text if available
+          throw new Error("Sunucu hatası: " + res.status + " / " + t);
+        }
+        // Try to parse JSON
+        let j;
+        try {
+          j = JSON.parse(t);
+        } catch(e) {
+          throw new Error("Yanıt JSON formatında değil: " + t);
+        }
+        return j.html || j.text || j.result || j.output || j;
+      } catch(e) {
+        // Log error for debugging
+        console.error("AI çağrısı hatası:", e);
+        throw e;
+      }
+    }
+
+    // Event bağlama
+    document.getElementById("drawBtn").addEventListener("click", ()=>{
+      const chosen = pickRandom4();
+      renderCards(chosen, true); // use animation
+      const p = buildPrompt(chosen);
+      document.getElementById("prompt").textContent = p;
+      document.getElementById("result").textContent = "Fal oluşturmak için 'Basit Yerel Yorum' ya da 'AI ile Oluştur' butonuna basın.";
+      // Seçimi yerel olarak cachele (global)
+      window.__chosen_cards = chosen;
+    });
+
+    document.getElementById("localBtn").addEventListener("click", ()=>{
+      const chosen = window.__chosen_cards || pickRandom4();
+      if(!window.__chosen_cards) renderCards(chosen);
+      const text = localSimpleReading(chosen);
+      document.getElementById("prompt").textContent = buildPrompt(chosen);
+      document.getElementById("result").textContent = text;
+    });
+
+    document.getElementById("aiBtn").addEventListener("click", async ()=>{
+      const chosen = window.__chosen_cards;
+      if(!chosen){
+        document.getElementById("result").textContent = "Önce 4 kart çekin (Çek butonuna basın).";
+        return;
+      }
+      const promptText = buildPrompt(chosen);
+      document.getElementById("prompt").textContent = promptText;
+      document.getElementById("result").textContent = "Yapay zekâdan yanıt bekleniyor...";
+
+      // --- Vibrate all colors effect ---
+      let vibrateActive = true;
+      let hue = 210, bright = 97;
+      const root = document.documentElement;
+      function vibrateAllColors(){
+        if(!vibrateActive) return;
+        hue = (hue + Math.floor(Math.random()*8+2)) % 360;
+        bright = 95 + Math.floor(Math.random()*6);
+        // Update all relevant CSS variables
+        root.style.setProperty('--bg-main', `hsl(${hue}, 60%, ${bright}%)`);
+        root.style.setProperty('--bg-card', `hsl(${(hue+10)%360}, 60%, ${bright+2}%)`);
+        root.style.setProperty('--bg-output', `hsl(${(hue+20)%360}, 60%, ${bright+3}%)`);
+        root.style.setProperty('--btn-main', `hsl(${(hue+40)%360}, 90%, 56%)`);
+        root.style.setProperty('--btn-secondary', `hsl(${(hue+60)%360}, 10%, 50%)`);
+        root.style.setProperty('--prompt-bg', `hsl(${(hue+80)%360}, 40%, 12%)`);
+        root.style.setProperty('--border-card', `hsl(${(hue+100)%360}, 30%, 90%)`);
+        root.style.setProperty('--border-output', `hsl(${(hue+120)%360}, 30%, 92%)`);
+        root.style.setProperty('--color-main', `hsl(${(hue+140)%360}, 20%, 12%)`);
+        root.style.setProperty('--color-meta', `hsl(${(hue+160)%360}, 10%, 35%)`);
+        root.style.setProperty('--color-small', `hsl(${(hue+180)%360}, 10%, 40%)`);
+        setTimeout(vibrateAllColors, 70);
+      }
+      vibrateAllColors();
+
+      try{
+        const aiReply = await callAI(promptText);
+        vibrateActive = false;
+        // Reset all colors to defaults
+        root.style.setProperty('--bg-main', 'hsl(210, 60%, 97%)');
+        root.style.setProperty('--bg-card', 'hsl(210, 60%, 99%)');
+        root.style.setProperty('--bg-output', 'hsl(210, 60%, 98%)');
+        root.style.setProperty('--btn-main', 'hsl(220, 90%, 56%)');
+        root.style.setProperty('--btn-secondary', 'hsl(220, 10%, 50%)');
+        root.style.setProperty('--prompt-bg', 'hsl(220, 40%, 12%)');
+        root.style.setProperty('--border-card', '#eee');
+        root.style.setProperty('--border-output', '#e6eefc');
+        root.style.setProperty('--color-main', '#111');
+        root.style.setProperty('--color-meta', '#555');
+        root.style.setProperty('--color-small', '#666');
+        // Eğer yanıt HTML ise innerHTML ile göster, değilse düz metin
+        if(typeof aiReply === "string" && aiReply.trim().startsWith("<div")) {
+          document.getElementById("result").innerHTML = aiReply;
+        } else if(typeof aiReply === "string") {
+          document.getElementById("result").textContent = aiReply;
+        } else if(aiReply && aiReply.html) {
+          document.getElementById("result").innerHTML = aiReply.html;
+        } else if(aiReply && aiReply.text) {
+          document.getElementById("result").textContent = aiReply.text;
+        } else if(aiReply && aiReply.output) {
+          document.getElementById("result").textContent = aiReply.output;
+        } else {
+          document.getElementById("result").textContent = JSON.stringify(aiReply, null, 2);
+        }
+      }catch(err){
+        vibrateActive = false;
+        // Reset all colors to defaults
+        root.style.setProperty('--bg-main', 'hsl(210, 60%, 97%)');
+        root.style.setProperty('--bg-card', 'hsl(210, 60%, 99%)');
+        root.style.setProperty('--bg-output', 'hsl(210, 60%, 98%)');
+        root.style.setProperty('--btn-main', 'hsl(220, 90%, 56%)');
+        root.style.setProperty('--btn-secondary', 'hsl(220, 10%, 50%)');
+        root.style.setProperty('--prompt-bg', 'hsl(220, 40%, 12%)');
+        root.style.setProperty('--border-card', '#eee');
+        root.style.setProperty('--border-output', '#e6eefc');
+        root.style.setProperty('--color-main', '#111');
+        root.style.setProperty('--color-meta', '#555');
+        root.style.setProperty('--color-small', '#666');
+        // Show error and fallback to local reading
+        document.getElementById("result").textContent = "AI çağrısı başarısız: " + err.message + "\n\nYerel yorum:\n" + localSimpleReading(window.__chosen_cards || []);
+      }
+    });
+
+    // Başlangıçta dataset yükle
+    loadDataset();
+  </script>
+</body>
+</html>
